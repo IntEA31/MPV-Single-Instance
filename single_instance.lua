@@ -3,10 +3,12 @@ local msg   = require 'mp.msg'
 local utils = require 'mp.utils'
 
 local ipc_socket_path
-if package.config:sub(1,1) == "\" then
-    ipc_socket_path = "\\\\.\\pipe\\mpvsocket"
+local is_windows = package.config:sub(1,1) == "\\"
+if is_windows then
+    ipc_socket_path = "\\\\.\\\\pipe\\mpvsocket"
 else
-    ipc_socket_path = "/tmp/mpvsocket"
+    local runtime_dir = os.getenv("XDG_RUNTIME_DIR") or "/tmp"
+    ipc_socket_path = runtime_dir .. "/mpvsocket"
 end
 
 local function escape_json_str(str)
@@ -21,7 +23,10 @@ local function get_full_path()
 end
 
 local function try_connect_pipe(path)
-    local f = io.open(path, "w")
+    -- Use a non-destructive check on Unix (don't open for writing,
+    -- which could create a regular file and block socket creation).
+    local mode = is_windows and "w" or "r"
+    local f = io.open(path, mode)
     if f then
         f:close()
         return true
@@ -50,6 +55,10 @@ local function send_file_to_main(path, filepath)
 end
 
 local function create_ipc_server(path)
+    -- Remove stale socket file on Unix-like systems before creating server.
+    if not is_windows then
+        pcall(os.remove, path)
+    end
     mp.set_property("input-ipc-server", path)
     msg.info("Created IPC server: " .. path)
 end
