@@ -16,6 +16,7 @@ local o = {
     -- file extensions for which extra_play_mode is used when opened in secondary mpv instance
     extra_play_types = [[ [ ".m3u", ".pls" ] ]], 
 }
+
 opts.read_options(o, "single_instance")
 
 local ipc_socket_path
@@ -39,6 +40,7 @@ local function get_play_mode(fname)
     -- check presence of fname extension within configured extra play types
     -- and based on (non)presence returns configured default/extra play mode
     for k,ext in pairs(utils.parse_json(o.extra_play_types)) do
+        print("DEBUG: "..k.." "..ext)
         if (fname:sub(-(#ext)) == ext:lower() ) then
             msg.info('get_play_mode() - match!, using ' .. o.extra_play_mode)
             return o.extra_play_mode
@@ -95,15 +97,17 @@ local function create_ipc_server(path)
     msg.info("Created IPC server: " .. path)
 end
 
-local is_main_instance = false
-if try_connect_pipe(ipc_socket_path) then
-    is_main_instance = false
-    msg.info("Another MPV instance detected. Acting as secondary.")
-else
-    create_ipc_server(ipc_socket_path)
-    is_main_instance = true
-    msg.info("No other instance found. Acting as main MPV.")
+function start_main_instance()
+    if try_connect_pipe(ipc_socket_path) then
+        msg.info("Another MPV instance detected. Acting as secondary.")
+        return false
+    else
+        create_ipc_server(ipc_socket_path)
+        msg.info("No other instance found. Acting as main MPV.")
+        return true
+    end
 end
+local is_main_instance = start_main_instance()
 
 mp.register_event("start-file", function()
     local filepath = get_full_path()
@@ -121,9 +125,9 @@ mp.register_event("start-file", function()
         msg.info("Secondary instance: forwarding file → quitting.")
 
         if send_file_to_main(ipc_socket_path, filepath) then
-            mp.add_timeout(0.1, function()
-                mp.commandv("quit")
-            end)
+            --mp.add_timeout(0.1, function()
+                mp.commandv("quit")     -- immediatelly exit after forwarding - prevent enqueuing of playlist tracks
+            --end )
         else
             msg.error("Failed to send file. Converting to main instance.")
             create_ipc_server(ipc_socket_path)
@@ -131,3 +135,4 @@ mp.register_event("start-file", function()
         end
     end
 end)
+
